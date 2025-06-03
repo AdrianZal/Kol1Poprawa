@@ -1,15 +1,16 @@
 namespace WebAPI.Models.DTOs;
 
-public class CreateBookingRequestDto
+public class CreateClientWithRentalRequestDto
 {
-    public int BookingId { get; set; }
-    public int GuestId { get; set; }
-    public string EmployeeNumber { get; set; }
-    public List<AddedAttraction> Attractions { get; set; }
+    public Client Client { get; set; }
+    public int CarId { get; set; }
+    public DateTime DateFrom { get; set; }
+    public DateTime DateTo { get; set; }
 }
 
-public class AddedAttraction
+public class Client
 {
-    public string Name { get; set; }
-    public int Amount { get; set; }
+    public string FirstName { get; set; }
+    public string LastName { get; set; }
+    public string Address { get; set; }
 }

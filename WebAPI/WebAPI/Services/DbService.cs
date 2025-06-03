@@ -13,14 +13,12 @@ public class DbService : IDbService
         _connectionString = configuration.GetConnectionString("Default") ?? string.Empty;
     }
     
-    public async Task<BookingDetailsDto> GetBookingByIdAsync(int bookingId)
+    public async Task<ClientDetailsDto> GetClientDetailsByIdAsync(int id)
     {
         var query =
-            @"SELECT b.date, g.first_name, g.last_name, g.date_of_birth, e.first_name, e.last_name, e.employee_number
-            FROM Booking b
-            JOIN Guest g ON b.guest_id = g.guest_id
-            JOIN Employee e ON b.employee_id = e.employee_id
-            WHERE b.booking_id = @bookingId;";
+            @"SELECT ID, FirstName, LastName, Address,  
+            FROM clients
+            WHERE ID = @id;";
         
         await using SqlConnection connection = new SqlConnection(_connectionString);
         await using SqlCommand command = new SqlCommand();
@@ -29,40 +27,33 @@ public class DbService : IDbService
         command.CommandText = query;
         await connection.OpenAsync();
         
-        command.Parameters.AddWithValue("@bookingId", bookingId);
+        command.Parameters.AddWithValue("@id", id);
         var reader = await command.ExecuteReaderAsync();
         
-        BookingDetailsDto? booking = null;
+        ClientDetailsDto? clientDetails = null;
         
         while (await reader.ReadAsync())
         {
-            if (booking is null)
+            if (clientDetails is null)
             {
-                booking = new BookingDetailsDto
+                clientDetails = new ClientDetailsDto
                 {
-                    BookingDate = reader.GetDateTime(0),
-                    Guest = new Guest()
-                    {
-                        FirstName = reader.GetString(1),
-                        LastName = reader.GetString(2),
-                        DateOfBirth = reader.GetDateTime(3)
-                    },
-                    Employee = new Employee()
-                    {
-                        FirstName = reader.GetString(4),
-                        LastName = reader.GetString(5),
-                        EmployeeNumber = reader.GetString(6),
-                    },
-                    Attractions = new List<Attraction>()
+                    Id = reader.GetInt32(0),
+                    FirstName = reader.GetString(1),
+                    LastName = reader.GetString(2),
+                    Address = reader.GetString(3),
+                    Rentals = new List<Rental>()
                 };
             }
         }       
         
         query =
-            @"SELECT a.name, a.price, ba.amount
-            FROM Booking_Attraction ba
-            JOIN Attraction a ON a.attraction_id = ba.attraction_id
-            WHERE ba.booking_id = @bookingId;";
+            @"SELECT c.VIN, cl.Name, m.Name, cr.DateFrom, cr.DateTo, cr.TotalPrice
+            FROM car_rentals cr
+            JOIN cars c ON c.CarID = cr.CarID
+            JOIN colors cl ON c.ColorID = cl.ColorID
+            JOIN models m ON m.ModelID = c.ModelID
+            WHERE cr.ClientID = @id;";
         
         await using SqlConnection connection1 = new SqlConnection(_connectionString);
         await using SqlCommand command1 = new SqlCommand();
@@ -71,23 +62,28 @@ public class DbService : IDbService
         command1.CommandText = query;
         await connection1.OpenAsync();
         
-        command1.Parameters.AddWithValue("@bookingId", bookingId);
+        command1.Parameters.AddWithValue("@id", id);
         var reader1 = await command1.ExecuteReaderAsync();
         
         while (await reader1.ReadAsync())
         {
-            booking.Attractions.Add(new Attraction()
+            clientDetails.Rentals.Add(new Rental()
             {
-                Name = reader1.GetString(0),
-                Price = reader1.GetDecimal(1),
-                Amount = reader1.GetInt32(2),
+                Vin = reader1.GetString(0),
+                Color = reader1.GetString(1),
+                Model = reader1.GetString(2),
+                DateFrom = reader1.GetDateTime(3),
+                DateTo = reader1.GetDateTime(4),
+                TotalPrice = reader1.GetInt32(5),
             });
         }       
+        if (clientDetails is null)
+            throw new NotFoundException($"Client with ID {id} not found.");
         
-        return booking;
+        return clientDetails;
     }
 
-    public async Task AddNewBookingAsync(CreateBookingRequestDto bookingRequest)
+    public async Task AddNewClientWithRentalAsync(CreateClientWithRentalRequestDto clientWithRentalRequest)
     {
         await using SqlConnection connection = new SqlConnection(_connectionString);
         await using SqlCommand command = new SqlCommand();
@@ -101,50 +97,42 @@ public class DbService : IDbService
         try
         {
             command.Parameters.Clear();
-            command.CommandText = "SELECT 1 FROM Guest WHERE guest_id = @GuestId;";
-            command.Parameters.AddWithValue("@GuestId", bookingRequest.GuestId);
+            command.CommandText = "SELECT PricePerDay FROM cars WHERE ID = @CarId;";
+            command.Parameters.AddWithValue("@CarId", clientWithRentalRequest.CarId);
+            var pricePerDay = await command.ExecuteScalarAsync();
             if ((await command.ExecuteScalarAsync()) is null)
-                throw new NotFoundException($"Guest with ID {bookingRequest.GuestId} not found.");
+                throw new NotFoundException($"Car with ID {clientWithRentalRequest.CarId} not found.");
             
-            command.Parameters.Clear();
-            command.CommandText = "SELECT employee_id FROM Employee WHERE employee_number = @EmployeeNumber;";
-            command.Parameters.AddWithValue("@EmployeeNumber", bookingRequest.EmployeeNumber);
-            var employeeId = await command.ExecuteScalarAsync();
-            if (employeeId is null)
-                throw new NotFoundException($"Employee {bookingRequest.EmployeeNumber} not found.");
-
+            var totalPrice = (clientWithRentalRequest.DateTo - clientWithRentalRequest.DateFrom).Days * (int)pricePerDay;
+            
             command.Parameters.Clear();
             command.CommandText = 
-                @"INSERT INTO Booking (booking_id, guest_id, employee_id, date)
-                        VALUES(@BookingId, @GuestId, @EmployeeId, @BookingDate);";
-            command.Parameters.AddWithValue("@BookingId", bookingRequest.BookingId);
-            command.Parameters.AddWithValue("@GuestId", bookingRequest.GuestId);
-            command.Parameters.AddWithValue("@EmployeeId", employeeId);
-            command.Parameters.AddWithValue("@BookingDate", DateTime.Now);
+                @"INSERT INTO clients (FirstName, LastName, Address)
+                        VALUES(@FirstName, @LastName, @Address);";
+            command.Parameters.AddWithValue("@FirstName", clientWithRentalRequest.Client.FirstName);
+            command.Parameters.AddWithValue("@LastName", clientWithRentalRequest.Client.LastName);
+            command.Parameters.AddWithValue("@Address", clientWithRentalRequest.Client.Address);
+            
+            command.Parameters.Clear();
+            command.CommandText = "SELECT ID FROM clients WHERE FirstName = @FirstName AND LastName = @LastName AND Address = @Address;";
+            command.Parameters.AddWithValue("@FirstName", clientWithRentalRequest.Client.FirstName);
+            command.Parameters.AddWithValue("@LastName", clientWithRentalRequest.Client.LastName);
+            command.Parameters.AddWithValue("@Address", clientWithRentalRequest.Client.Address);
+            var clientId = await command.ExecuteScalarAsync();
+            
+            command.Parameters.Clear();
+            command.CommandText = 
+                @"INSERT INTO car_rentals (ClientID, CarID, @DateFrom, @DateTo, @TotalPrice)
+                        VALUES(@ClientID, @CarID, @DateFrom, @DateTo, @TotalPrice);";
+            command.Parameters.AddWithValue("@ClientID", clientId);
+            command.Parameters.AddWithValue("@CarID", clientWithRentalRequest.CarId);
+            command.Parameters.AddWithValue("@DateFrom", clientWithRentalRequest.DateFrom);
+            command.Parameters.AddWithValue("@DateTo", clientWithRentalRequest.DateTo);
+            command.Parameters.AddWithValue("@TotalPrice", totalPrice);
+            
+            
             
             await command.ExecuteNonQueryAsync();
-            
-            foreach (var attraction in bookingRequest.Attractions)
-            {
-                command.Parameters.Clear();
-                command.CommandText = "SELECT attraction_id FROM Attraction WHERE name = @AttractionName;";
-                command.Parameters.AddWithValue("@AttractionName", attraction.Name);
-                
-                var attractionId = await command.ExecuteScalarAsync();
-                if(attractionId is null)
-                    throw new NotFoundException($"Attraction - {attraction.Name} - not found.");
-                
-                command.Parameters.Clear();
-                command.CommandText = 
-                    @"INSERT INTO Booking_Attraction (booking_id, attraction_id, amount)
-                        VALUES(@BookingId, @AttractionId, @AttractionAmount);";
-        
-                command.Parameters.AddWithValue("@BookingId", bookingRequest.BookingId);
-                command.Parameters.AddWithValue("@AttractionId", attractionId);
-                command.Parameters.AddWithValue("@AttractionAmount", attraction.Amount);
-                
-                await command.ExecuteNonQueryAsync();
-            }
             
             await transaction.CommitAsync();
         }

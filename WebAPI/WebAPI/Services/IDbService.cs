@@ -4,6 +4,6 @@ namespace WebAPI.Services;
 
 public interface IDbService
 {
-    Task<BookingDetailsDto> GetBookingByIdAsync(int bookingId);
-    Task AddNewBookingAsync(CreateBookingRequestDto bookingRequest);
+    Task<ClientDetailsDto> GetClientDetailsByIdAsync(int id);
+    Task AddNewClientWithRentalAsync(CreateClientWithRentalRequestDto clientWithRentalRequest);
 }
